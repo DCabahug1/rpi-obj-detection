@@ -85,3 +85,56 @@ Choices made while building Vision Pin, and why. Newest at the bottom.
 - Tests cover the pure-logic modules only (distance, callout, speech queue). The detector and
   camera classes are exercised by the end-to-end video runs rather than unit tests.
 - Model weights and exports are git-ignored; `tools/export_model.py` regenerates them.
+
+## Laptop verification (Windows 11, Logitech C270 webcam, 2026-10-13)
+First run on real hardware: Python 3.12 venv, CPU-only torch 2.14, ultralytics 8.4, opencv-python 5.0,
+pyttsx3 2.99. The 20 unit tests passed unchanged; the fixes below add three more.
+
+- **Webcam start-up.** OpenCV's default Media Foundation backend took 7 s to open the C270 and 22 s
+  to deliver the first frame. DirectShow opened in 0.6 s but was stuck at 15 fps (YUY2, fps and
+  fourcc hints ignored). Setting `OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS=0` before cv2 is imported
+  keeps Media Foundation and gives open 0.5 s, first frame 1 s, 30 fps. `capture.py` sets it on
+  Windows only, with `setdefault` so a value from the environment wins.
+- **Speech was silent on Windows, for two separate reasons.**
+  1. The pyttsx3 engine was created on the main thread and used from the speaker thread. SAPI5 is a
+     single-threaded COM object, so the first `runAndWait()` blocked forever with no error. The
+     `Speaker` now takes an engine *factory* and creates, uses and closes the engine on its worker
+     thread. `Speaker(engine_instance)` still works (tests), and a failing factory falls back to
+     `LogEngine` as before.
+  2. With the pyttsx3 2.99 sapi5 driver only the first `say()` + `runAndWait()` is heard. After the
+     first loop the driver proxy is left not-busy, so the next `say()` dispatches immediately and the
+     following `runAndWait()` pops its end-loop command first; that command calls `stop()`, which
+     purges the utterance 20 ms in (measured: `finished-utterance` with `completed=False`). On
+     Windows the engine now drives the documented external loop instead (`startLoop(False)`, then
+     `say()` and `iterate()` until `isBusy()` is false, with a 15 s safety timeout). Five
+     consecutive utterances then complete with `completed=True` and realistic durations. Linux keeps
+     `runAndWait()`: the espeak driver renders synchronously inside it and has no working external
+     loop in 2.99 (its `iterate()` is not a generator), so the two platforms need different calls.
+- **Beep on Windows** uses the stdlib `winsound.Beep`; simpleaudio has no Windows wheel.
+- **`--depth` crashed without a terminal.** `torch.hub.load("intel-isl/MiDaS", ..., trust_repo=True)`
+  is fine, but MiDaS's own hubconf loads its EfficientNet backbone from
+  `rwightman/gen-efficientnet-pytorch` *without* `trust_repo`, so torch prompts on stdin and raises
+  `EOFError` when there is none (and would stop the app to ask otherwise). `distance.py` now calls
+  `torch.hub.help(...)` on that repo with `trust_repo=True` first, which fetches it and adds it to
+  torch's trusted list. First run downloads ~100 MB; later runs load from cache in ~3 s. MiDaS small
+  takes ~50 ms per 320x240 frame on this CPU.
+- **Measured end to end (webcam, 320x240):** ~30 fps with `yolov8n.pt`, ~24 fps with `--depth`
+  (every 3rd frame). fps stayed at 27-30 while speech was playing: the loop never waits on TTS.
+- **`--show` and `q`:** window up ~4 s after launch (model load + webcam), `q` exits cleanly with
+  "Processed N frames".
+- **Speech latency, for the acceptance tests.** One 3-word callout takes ~3 s from dequeue to done
+  (0.12 s beep, roughly 1 s of SAPI audio start-up, two comma pauses, the words at 190 wpm). Two near
+  objects in view therefore produce ~6 s of speech per 4 s rate-limit window and the queue falls
+  behind; priority still puts "person" first and `close()` gives up flushing after 3 s. If this is
+  too chatty, raise `callout.rate_limit_s` first; dropping the commas from the phrasing (code) is
+  the next lever.
+- **Depth thresholds look too strict.** A person filling 98 % of the frame height measured a median
+  normalised depth of 0.55-0.62, i.e. "medium" with `depth.near: 0.70`; a large plant on the left
+  measured 0.04-0.06, "far". For big boxes the median includes background pixels. Left unchanged
+  until the chair and walking tests are repeated with `--depth`; `-v` now logs the per-box median so
+  the thresholds can be set from data. A high percentile instead of the median is the code-level
+  alternative if tuning alone is not enough.
+- **Still unverified:** the Raspberry Pi path (picamera2, NCNN, espeak-ng, Bluetooth, systemd) and
+  real espeak-ng speech on Linux. The Linux speech path is reasoned from the 2.99 driver source;
+  only the Windows path has been run here, and whether the audio is audible and correctly worded is
+  for the physical acceptance tests.

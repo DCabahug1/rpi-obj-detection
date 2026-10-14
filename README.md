@@ -23,6 +23,10 @@ python main.py --source webcam --show
 
 The first run downloads `yolov8n.pt` (6 MB). Press `q` in the window or Ctrl-C to quit.
 
+Windows: use `python -m venv .venv` and `.venv\Scripts\activate` (PowerShell:
+`.venv\Scripts\Activate.ps1`); everything else is the same. Verified on Windows 11 with a
+Logitech C270 and the built-in SAPI voices, see [DECISIONS.md](DECISIONS.md).
+
 What you should see and hear:
 
 - fps printed to the terminal once a second (target >= 5 fps; a modern laptop does 20-60).
@@ -32,6 +36,7 @@ What you should see and hear:
 
 Linux TTS needs a speech engine: `sudo apt install espeak-ng` (macOS and Windows use the built-in voices).
 If no engine is found the program keeps running and logs the callouts instead of speaking them.
+`-v` logs how long each callout took to speak.
 
 ### Useful flags
 
@@ -40,7 +45,7 @@ If no engine is found the program keeps running and logs the callouts instead of
 | `--source webcam\|picam\|video` | Camera type. `video` replays a file (`--video clip.mp4`) for development. |
 | `--show` | Draw boxes, the current callout, and fps in a window. |
 | `--model PATH` | Use `.pt`, `.onnx`, or an exported `yolov8n_ncnn_model/` directory. |
-| `--depth` | Use MiDaS small for distance (off by default, slower). |
+| `--depth` | Use MiDaS small for distance (off by default, slower). The first run downloads ~100 MB of model code and weights from GitHub. Run with `-v` to log the per-box depth values when tuning `depth.near` / `depth.medium`. |
 | `--mute` | Log callouts instead of speaking. |
 | `--fast-video --max-frames N` | Loop a video file as fast as possible: an fps benchmark. |
 | `--config FILE` | Alternative config (default `config.yaml`). |
@@ -160,6 +165,8 @@ The unit waits 8 seconds after boot so Bluetooth has time to reconnect before th
   instead of building up a lag behind a walking person.
 - Measured in a 4-core x86 container with synthetic 320x240 clips (`--fast-video`): PyTorch
   `yolov8n.pt` ~55 fps, NCNN ~60 fps, ONNX (onnxruntime) ~17 fps. Details in [DECISIONS.md](DECISIONS.md).
+- Measured end to end on a Windows 11 laptop with a Logitech C270 at 320x240 (CPU-only torch):
+  ~30 fps with `yolov8n.pt`, ~24 fps with `--depth` (MiDaS every 3rd frame, ~50 ms per run).
 - Low fps on the Pi? Use the NCNN export, keep `model.imgsz` at 320, and leave `--depth` off.
 
 ## Tests

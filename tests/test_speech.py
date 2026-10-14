@@ -73,3 +73,45 @@ def test_engine_error_does_not_kill_thread():
     s.say(co("ok", 2))
     s.close()
     assert eng.spoken == ["ok"]
+
+
+def test_factory_runs_on_worker_thread():
+    created_on = []
+
+    def factory():
+        created_on.append(threading.current_thread())
+        return LogEngine()
+
+    s = Speaker(factory)
+    assert isinstance(s.engine, LogEngine)
+    assert created_on and created_on[0] is not threading.main_thread()
+    s.say(co("chair", 6))
+    s.close()
+    assert s.engine.spoken == ["chair"]
+
+
+def test_factory_failure_falls_back_to_logging():
+    def factory():
+        raise RuntimeError("no audio device")
+
+    s = Speaker(factory)
+    assert isinstance(s.engine, LogEngine)
+    s.say(co("person", 0))
+    s.close()
+    assert s.engine.spoken == ["person"]
+
+
+def test_engine_closed_on_worker_thread():
+    class Closing(LogEngine):
+        def __init__(self):
+            super().__init__()
+            self.closed_on = None
+
+        def close(self):
+            self.closed_on = threading.current_thread()
+
+    eng = Closing()
+    s = Speaker(eng)
+    s.say(co("x", 1))
+    s.close()
+    assert eng.closed_on is not None and eng.closed_on is not threading.main_thread()

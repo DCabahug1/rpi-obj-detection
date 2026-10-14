@@ -7,10 +7,18 @@ than the camera, old frames are dropped instead of queued.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Optional
+
+if sys.platform == "win32":
+    # OpenCV's Media Foundation webcam backend can take ~20 s to deliver its first frame when its
+    # hardware transforms are enabled (22 s measured with a Logitech C270); with them off it is
+    # ~1 s at the full 30 fps. Must be set before cv2 is first imported anywhere in the process.
+    os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 
 import cv2
 import numpy as np

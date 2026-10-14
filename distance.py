@@ -65,6 +65,10 @@ class MidasEstimator:
         import torch  # lazy: only pulled in when --depth is used
 
         log.info("Loading MiDaS_small via torch.hub (first run downloads weights)")
+        # MiDaS_small's hubconf loads its EfficientNet backbone from a second GitHub repo without
+        # trust_repo, so torch.hub stops to ask on stdin (and raises EOFError when there is none).
+        # Fetching that repo ourselves with trust_repo=True adds it to torch's trusted list first.
+        torch.hub.help("rwightman/gen-efficientnet-pytorch", "tf_efficientnet_lite3", trust_repo=True)
         model = torch.hub.load("intel-isl/MiDaS", "MiDaS_small", trust_repo=True)
         model.to(self.device).eval()
         transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
@@ -106,6 +110,7 @@ class MidasEstimator:
         if x2 <= x1 or y2 <= y1:
             return self.fallback.estimate(frame_bgr, det)
         med = float(np.median(self._depth[y1:y2, x1:x2]))
+        log.debug("depth median %.2f for %s (box h=%.2f)", med, det.label, det.h_frac)
         if med >= self.near:
             return NEAR
         if med >= self.medium:
