@@ -21,6 +21,7 @@ class Detection:
     y2: int
     cx_frac: float      # box centre x as a fraction of frame width (0 left .. 1 right)
     h_frac: float       # box height as a fraction of frame height
+    w_frac: float       # box width as a fraction of frame width
 
 
 def map_label(raw: str, class_map: dict[str, str]) -> str:
@@ -67,5 +68,6 @@ class Detector:
                 label=map_label(raw, self.class_map), raw_label=raw, conf=float(c),
                 x1=int(x1), y1=int(y1), x2=int(x2), y2=int(y2),
                 cx_frac=float((x1 + x2) / 2.0 / w), h_frac=float((y2 - y1) / h),
+                w_frac=float((x2 - x1) / w),
             ))
         return out
