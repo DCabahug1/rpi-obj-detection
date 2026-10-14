@@ -24,6 +24,60 @@ depth:
   near: 0.70
   medium: 0.45
 
+# Vertical zones for a chest-mounted camera, all fractions of frame height (0 = top, 1 = bottom).
+#   low      = box top at/below low_top_min AND box bottom at/below low_bottom_min  -> "step over"
+#   overhead = box top at/above overhead_top_max AND bottom above overhead_bottom_max -> "duck"
+# Low obstacles measure distance by their bottom edge instead of box height (see distance.py).
+zones:
+  low_top_min: 0.50
+  low_bottom_min: 0.80
+  low_near_bottom: 0.90
+  low_medium_bottom: 0.75
+  overhead_top_max: 0.10
+  overhead_bottom_max: 0.50
+  exclude:                 # classes that are never "low" or "overhead"
+    - person
+
+# What to SAY about a low or overhead obstacle. A prescriptive word ("step over", "duck", set under
+# callout:) is only used when the geometry backs it up; otherwise the descriptive word is used.
+actions:
+  low_word: low
+  overhead_word: overhead
+  step_over_max_h: 0.30        # steppable only if the box is at most this fraction of frame height
+  step_over_max_w: 0.45        # ... and at most this fraction of frame width
+  edge_margin_frac: 0.02       # a box touching the left/right edge is partly out of view: never prescriptive
+  prescriptive_only_ahead: true  # "step over"/"duck" only for objects straight ahead; sides get "low"/"overhead"
+  min_stable_frames: 3         # a low/overhead obstacle must hold its zone this many frames before it is spoken
+  never_step_over:             # matched against the COCO name and the spoken word
+    - person
+    - chair
+    - table
+    - dining table
+    - couch
+    - bed
+    - bench
+    - toilet
+    - potted plant
+    - plant
+    - suitcase
+    - bicycle
+    - motorcycle
+    - car
+    - bus
+    - truck
+    - dog
+    - cat
+    - horse
+    - sheep
+    - cow
+    - pole
+    - post
+    - stairs
+    - fire hydrant
+    - hydrant
+    - parking meter
+    - meter
+
 # Direction from box centre x as a fraction of frame width.
 direction:
   left_max: 0.38           # cx < 0.38 -> left
@@ -36,8 +90,14 @@ approach:
 
 callout:
   rate_limit_s: 4.0        # same class + same direction not repeated within this many seconds
+  same_box_iou: 0.5        # a box overlapping a recently spoken one this much is the same object (bus/truck flicker)
   near_word: close
   medium_word: medium
+  # Classes outside the vocabulary (priority list + class_map words) are spoken as this word.
+  # They are only announced when low or overhead, i.e. when there is something to do about them.
+  ambiguous_word: object
+  step_over_word: step over   # prescriptive words; when to use them is decided under actions:
+  duck_word: duck
   # Highest first. Unlisted classes rank last. "stairs"/"pole"/"post" are not COCO classes
   # but are kept so a custom model with those labels slots in without code changes.
   priority:
@@ -50,6 +110,7 @@ callout:
     - truck
     - pole
     - post
+    - object              # ambiguous low/overhead hazard: outranks furniture
     - chair
     - table
     - bench
@@ -67,8 +128,15 @@ class_map:
   sports ball: ball
   teddy bear: toy
   hair drier: dryer
+  # identity entries: keep these names in the vocabulary so they are spoken in every zone
+  couch: couch
+  bed: bed
+  toilet: toilet
+  suitcase: suitcase
 
 # Classes that don't matter when walking. Matched against the raw COCO name.
+# Things that can lie on the floor (bags, balls, bottles, skateboards, cats...) are deliberately
+# NOT here: they become "object ... step over" when low, and stay silent otherwise.
 ignore_classes:
   - tv
   - laptop
@@ -87,7 +155,6 @@ ignore_classes:
   - knife
   - spoon
   - bowl
-  - bottle
   - wine glass
   - banana
   - apple
@@ -100,21 +167,14 @@ ignore_classes:
   - donut
   - cake
   - tie
-  - handbag
-  - backpack
-  - umbrella
-  - frisbee
   - kite
-  - baseball bat
   - baseball glove
-  - skateboard
   - surfboard
   - tennis racket
   - airplane
   - boat
   - train
   - bird
-  - cat
   - sheep
   - cow
   - elephant

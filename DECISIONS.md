@@ -138,3 +138,131 @@ pyttsx3 2.99. The 20 unit tests passed unchanged; the fixes below add three more
   real espeak-ng speech on Linux. The Linux speech path is reasoned from the 2.99 driver source;
   only the Windows path has been run here, and whether the audio is audible and correctly worded is
   for the physical acceptance tests.
+
+## Object abstraction (branch `feature/object-abstraction`)
+Goal: tell the user what to *do* about things in the path (step over, duck), and stop announcing
+raw COCO names for classes that are not already part of the spoken vocabulary.
+
+- **New module `obstacle.py`.** A `Detection` becomes an `Obstacle` carrying the spoken label,
+  whether that label is a real class name (`known`), a vertical `zone` and an `action`. The
+  callout planner now works on obstacles; `detect.py` and the camera code are untouched.
+- **Vocabulary = priority list + `class_map` words.** Anything else is spoken as
+  `callout.ambiguous_word` ("object"). This is the literal reading of "names not already included
+  can just be ambiguous". `person` is always known. Identity entries were added to `class_map` for
+  couch, bed, toilet and suitcase so big furniture keeps its name.
+- **Zones from box geometry, not from a model.** With a chest camera roughly level: `low` = box
+  top in the lower half and bottom at or below 0.80 of the frame; `overhead` = box top at the
+  frame edge and bottom above mid frame. Thresholds live under `zones:` and will need tuning on the
+  real mount and camera tilt. A near person spans the whole frame height and is `normal`; people
+  are excluded from zones outright (`zones.exclude`) so a short or seated person is never
+  "step over".
+- **Low obstacles measure distance by bottom edge.** Box height is useless for a small floor
+  object (it stays small however close it is), while the bottom edge slides down the frame as you
+  approach. `BottomEdgeEstimator` (`zones.low_near_bottom` 0.90, `low_medium_bottom` 0.75) is used
+  for low obstacles only; normal and overhead keep box height (or MiDaS with `--depth`). The
+  approach metric follows the same split: bottom edge for low, height for the rest.
+- **Ambiguous objects speak only when low or overhead.** A backpack carried at chest height, a
+  bottle on a table, a cat on a sofa are not walking hazards and would make "object, close, ahead"
+  noise. The same classes on the floor are hazards and are announced with "step over". Known
+  classes keep speaking in every zone as before.
+- **Ignore list trimmed.** bottle, backpack, handbag, umbrella, frisbee, sports ball, baseball bat,
+  skateboard and cat left the ignore list because they can lie in the path. Because they are not in
+  the vocabulary they only ever surface as "object ... step over" / "duck".
+- **Priority.** `object` sits after `post` and before `chair`: a trip hazard outranks furniture
+  but not people or vehicles.
+- **Phrasing.** The action is appended: "object, close, left, step over", "object, ahead, step
+  over" (the near+ahead drop rule still applies), "sign, medium, right, duck". Rate limit key is
+  unchanged (label, direction), so repeated "object" in one direction is throttled.
+- **Limits.** YOLOv8n can only name COCO classes. Boxes, curbs, steps, cables and branches have no
+  class, so a floor hazard is only announced if the model recognises it as *something*. Getting
+  past this needs a different detector (a custom "obstacle" model or depth-based ground-plane
+  segmentation); the zone/action plumbing here is detector-agnostic and ready for that.
+- **Verification (headless, synthetic 320x240 clips, `--mute`).** 38 unit tests pass (15 new).
+  A 35 %-tall bus crop sliding down to the frame bottom: "bus, ahead, step over"; the same clip
+  with `bus` removed from the vocabulary: "object, ahead, step over"; a bus at chest height with
+  `bus` removed: silent; with `bus` known: "bus, ahead". A bus crop hanging from the top edge:
+  "bus, medium, right, duck". Person and empty-room clips behave exactly as before. Throughput
+  unchanged at ~50 fps (`--fast-video`). The real tests are a bag on the floor and a low branch or
+  sign with the webcam; a tie crop and a 16 %-tall bus crop were simply not detected on a grey
+  background, which is a limitation of the synthetic clips, not the pipeline.
+- **Observed on the clips:** YOLO flips the same crop between `bus` and `truck` on some frames,
+  which produces two callouts because they are different labels. Pre-existing behaviour, not
+  introduced here; a label-stability filter is a candidate follow-up.
+
+## Action abstraction: "step over" is a decision, not a position (feature/object-abstraction, round 2)
+**Reported:** a tall plant in the bottom-left corner of the view was announced with "step over".
+Being close and near the bottom of the frame does not mean the thing can be stepped over.
+
+**Root cause.** The first version bound the action to the zone: `low` -> "step over". Zone is
+only a *position* test. The plant was low by position (its box top was below mid frame because
+most of the plant was outside the view to the left), so it got the action.
+
+**Fix: separate the action from the zone and make it confidence-gated.** `obstacle.py` now
+carries both a descriptive `position` ("low", "overhead") and a prescriptive `action` ("step
+over", "duck"), and the action is only set when all of these hold:
+- **Size.** Box height <= `actions.step_over_max_h` (0.30) and width <= `step_over_max_w` (0.45).
+  A flat suitcase is short but wide and is not steppable.
+- **Class.** Not in `actions.never_step_over` (furniture, plants, animals, vehicles, people...).
+  Matched on both the COCO name and the spoken word.
+- **Visibility.** The box does not touch the left or right frame edge (`edge_margin_frac`). A box
+  cut by the edge continues out of view, so its apparent size is meaningless. This alone would have
+  caught the plant.
+- **Path.** Prescriptive words only for objects straight ahead (`prescriptive_only_ahead`). Off
+  to the side the user is not going to walk over it, so the callout describes instead:
+  "object, close, left, low".
+- **Stability.** A low/overhead reading must hold for `min_stable_frames` (3) consecutive frames
+  before the obstacle is spoken at all. One frame at the bottom of the view is not evidence.
+
+**When not confident, describe, never prescribe.** Ambiguous objects keep the position word so
+"object" still carries information ("object, ahead, low"). Known classes get nothing extra:
+"plant, close, left" already says what matters.
+
+**Workarounds considered and why they were not chosen**
+- Only tuning the zone thresholds. Would move the failure, not remove it: any position-only rule
+  mislabels a big thing whose box happens to sit low.
+- A depth model for real size. `--depth` exists but is off by default for fps reasons and, as
+  logged above, its thresholds are not yet trustworthy. The geometry gates above cost nothing.
+- Dropping "step over" altogether and only ever describing. Safer, but it throws away the one
+  case where the word is clearly useful (a small object fully in view, straight ahead). The gates
+  keep that case and drop the rest.
+- A per-class "steppable" whitelist instead of a blacklist. Rejected because the interesting
+  objects are exactly the ones YOLO cannot name (boxes, cables, kerbs): they arrive as "object",
+  so size and visibility have to do the work. The blacklist covers the named classes that are
+  never steppable however small their box looks.
+
+**Edge cases handled**
+- Object partly out of view at a frame edge (the plant): truncated -> never prescriptive.
+- Big low object (suitcase, dog bed, step): fails the size gate -> descriptive.
+- Small animal (cat, dog): in the never list; it moves, you go around it.
+- Low object to the side: descriptive, not "step over".
+- Overhead object to the side (sign on the right): "overhead", not "duck".
+- Zone flicker frame to frame: `min_stable_frames`, keyed by (label, zone, direction).
+- Label flicker (same box read as bus then truck, chair then couch): a new same-box rule
+  (`callout.same_box_iou` 0.5) suppresses a second callout for a box overlapping one spoken in the
+  last rate-limit window. Escalation to near still gets through.
+- A seated or short person low in the frame: people are excluded from zones entirely.
+- A bottle on a table at chest height: normal zone and ambiguous -> silent, as before.
+
+**Edge cases NOT handled, and what would**
+- Camera tilt. If the chest mount points down, everything reads low; if it points up, nothing does.
+  The `zones` thresholds assume roughly level. A one-off calibration step (look at an empty floor,
+  measure where the floor meets the frame) is the right follow-up.
+- Stairs, kerbs, cables, open doors, glass: no COCO class, so no detection at all. Needs a custom
+  model or depth-based ground-plane segmentation; the zone/action plumbing is detector-agnostic.
+- A low object dead ahead but far away stays silent until it is medium and approaching, like
+  everything else. Deliberate: silence when nothing is near is the product's core rule.
+
+**Verification (headless, synthetic clips).** 50 unit tests pass (12 new). Small bus crop sliding
+down the centre with `bus` removed from the vocabulary and never-list: "object, ahead, step over".
+Same crop pushed into the bottom-left corner so it touches the edge: "object, close, left, low".
+Tall bus crop low in frame: "object, ahead, low" (ambiguous) and "bus, ahead" (known, not
+steppable). Overhead crop on the right: "bus, medium, right" / "object, medium, right, overhead",
+no "duck" since it is not ahead. Chest-height ambiguous object: silent. Person and empty clips
+unchanged. The bus/truck double callout seen in round 1 is gone. ~47 fps with `--fast-video`.
+
+## macOS readiness (for the campus test)
+- `pyobjc` is now a macOS requirement: pyttsx3's native driver needs it.
+- The beep on macOS uses `afplay` with a system sound; `simpleaudio` was dropped from
+  `requirements.txt` because it has no wheels for current Pythons and fails to build on many Macs,
+  which would have broken `pip install -r requirements.txt`. It remains an optional manual install
+  for Linux.
