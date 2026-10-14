@@ -1,0 +1,32 @@
+# Two ways to run the image. Pick one with --profile; see DOCKER.md.
+#
+#   docker compose --profile linux up          # Linux host: real webcam + speakers passed through
+#   docker compose --profile stream up         # macOS / Windows: webcam streamed in from the host with ffmpeg
+#
+# Both mount ./data at /data for clips and an optional custom config.yaml.
+services:
+  visionpin-linux:
+    profiles: ["linux"]
+    build: .
+    image: visionpin
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/snd:/dev/snd
+    group_add:
+      - video
+      - audio
+    volumes:
+      - ./data:/data
+    command: ["--source", "webcam"]
+
+  visionpin-stream:
+    profiles: ["stream"]
+    build: .
+    image: visionpin
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/data
+    # Docker Desktop (macOS and Windows) cannot pass the camera or speakers into a container. The
+    # host streams the camera over TCP with ffmpeg (commands in DOCKER.md); callouts are logged.
+    command: ["--source", "video", "--video", "tcp://host.docker.internal:5000", "--mute"]
