@@ -50,11 +50,15 @@ def load_config(path: str) -> dict:
 
 def build_planner(cfg: dict) -> CalloutPlanner:
     c, d, a = cfg["callout"], cfg["direction"], cfg["approach"]
+    act = cfg.get("actions", {})
     return CalloutPlanner(
         priority=c["priority"], rate_limit_s=float(c["rate_limit_s"]),
         left_max=float(d["left_max"]), right_min=float(d["right_min"]),
         approach_window=int(a["window"]), approach_min_growth=float(a["min_growth_frac"]),
         near_word=c.get("near_word", "close"), medium_word=c.get("medium_word", "medium"),
+        prescriptive_only_ahead=bool(act.get("prescriptive_only_ahead", True)),
+        min_stable_frames=int(act.get("min_stable_frames", 3)),
+        same_box_iou=float(c.get("same_box_iou", 0.5)),
     )
 
 
@@ -77,8 +81,10 @@ def draw(frame, cands: list[Candidate], callout: Optional[Callout], fps: float):
         d = c.det
         color = (0, 0, 255) if c.distance == NEAR else (0, 165, 255) if c.distance == "medium" else (0, 200, 0)
         cv2.rectangle(frame, (d.x1, d.y1), (d.x2, d.y2), color, 1)
-        zone = "" if c.obs.zone == NORMAL else f" {c.obs.zone[0].upper()}"   # L = low, O = overhead
-        tag = f"{c.obs.label} {c.distance[0]}{'+' if c.approaching else ''} {c.direction[0]}{zone}"
+        # L = low, O = overhead; "!" = steppable/duckable, "?" = partly out of view, "~" = not stable yet
+        zone = "" if c.obs.zone == NORMAL else f" {c.obs.zone[0].upper()}"
+        flags = ("!" if c.obs.action else "") + ("?" if c.obs.truncated else "") + ("" if c.stable else "~")
+        tag = f"{c.obs.label} {c.distance[0]}{'+' if c.approaching else ''} {c.direction[0]}{zone}{flags}"
         cv2.putText(frame, tag, (d.x1, max(10, d.y1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
     if callout:
         cv2.putText(frame, callout.text, (4, frame.shape[0] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
