@@ -20,7 +20,8 @@ import yaml
 from callout import Callout, CalloutPlanner, Candidate
 from capture import LatestFrameGrabber, make_source
 from detect import Detector
-from distance import BoxHeightEstimator, NEAR
+from distance import BottomEdgeEstimator, BoxHeightEstimator, NEAR
+from obstacle import LOW, NORMAL, ObstacleClassifier
 
 log = logging.getLogger("visionpin")
 
@@ -76,7 +77,8 @@ def draw(frame, cands: list[Candidate], callout: Optional[Callout], fps: float):
         d = c.det
         color = (0, 0, 255) if c.distance == NEAR else (0, 165, 255) if c.distance == "medium" else (0, 200, 0)
         cv2.rectangle(frame, (d.x1, d.y1), (d.x2, d.y2), color, 1)
-        tag = f"{d.label} {c.distance[0]}{'+' if c.approaching else ''} {c.direction[0]}"
+        zone = "" if c.obs.zone == NORMAL else f" {c.obs.zone[0].upper()}"   # L = low, O = overhead
+        tag = f"{c.obs.label} {c.distance[0]}{'+' if c.approaching else ''} {c.direction[0]}{zone}"
         cv2.putText(frame, tag, (d.x1, max(10, d.y1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
     if callout:
         cv2.putText(frame, callout.text, (4, frame.shape[0] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
@@ -102,6 +104,10 @@ def main(argv=None) -> int:
     )
     detector.warmup(width, height)
     dist = build_distance(cfg, args.depth)
+    zones = cfg.get("zones", {})
+    low_dist = BottomEdgeEstimator(float(zones.get("low_near_bottom", 0.90)),
+                                   float(zones.get("low_medium_bottom", 0.75)))
+    classifier = ObstacleClassifier.from_config(cfg)
     planner = build_planner(cfg)
 
     from speech import make_speaker
@@ -146,8 +152,10 @@ def main(argv=None) -> int:
             now = time.monotonic()
             dist.tick()
             dets = detector.detect(frame)
-            buckets = [dist.estimate(frame, d) for d in dets]
-            callout, cands = planner.plan(dets, buckets, now)
+            obstacles = classifier.classify(dets, frame.shape[0])
+            buckets = [low_dist.estimate(frame, o.det) if o.zone == LOW else dist.estimate(frame, o.det)
+                       for o in obstacles]
+            callout, cands = planner.plan(obstacles, buckets, now)
             if callout:
                 speaker.say(callout)
                 last_callout, last_callout_t = callout, now

@@ -1,12 +1,18 @@
-"""Decides what to say: qualification, priority, rate limiting, and phrasing."""
+"""Decides what to say: qualification, priority, rate limiting, and phrasing.
+
+Works on Obstacles (see obstacle.py), so it knows each object's spoken label, whether that
+label is a real class name or the ambiguous word, and whether the object is low (step over),
+overhead (duck) or at body height.
+"""
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Dict, Iterable, Optional, Sequence, Tuple
+from typing import Deque, Dict, Hashable, Iterable, Optional, Sequence, Tuple
 
 from detect import Detection
 from distance import FAR, MEDIUM, NEAR
+from obstacle import LOW, NORMAL, Obstacle
 
 LEFT, AHEAD, RIGHT = "left", "ahead", "right"
 
@@ -27,34 +33,39 @@ class Callout:
     direction: str
     priority_rank: int   # lower = more important
     is_near: bool
+    zone: str = NORMAL
+    action: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class Candidate:
-    det: Detection
+    obs: Obstacle
     distance: str
     direction: str
     approaching: bool
 
+    @property
+    def det(self) -> Detection:
+        return self.obs.det
+
 
 class ObjectHistory:
-    """Remembers recent box heights per (label, direction) to detect approach (growth)."""
+    """Remembers a recent size metric per object key to detect approach (growth)."""
 
     def __init__(self, window: int = 5, min_growth_frac: float = 0.04):
         self.window = window
         self.min_growth = min_growth_frac
-        self._hist: Dict[Tuple[str, str], Deque[float]] = {}
+        self._hist: Dict[Hashable, Deque[float]] = {}
 
-    def update(self, label: str, direction: str, h_frac: float) -> None:
-        key = (label, direction)
+    def update(self, key: Hashable, value: float) -> None:
         dq = self._hist.get(key)
         if dq is None:
             dq = deque(maxlen=self.window)
             self._hist[key] = dq
-        dq.append(h_frac)
+        dq.append(value)
 
-    def is_approaching(self, label: str, direction: str) -> bool:
-        dq = self._hist.get((label, direction))
+    def is_approaching(self, key: Hashable) -> bool:
+        dq = self._hist.get(key)
         if not dq or len(dq) < self.window:
             return False
         first, last = dq[0], dq[-1]
@@ -66,7 +77,7 @@ class ObjectHistory:
         shrinks = sum(1 for a, b in steps if b < a)
         return grows * 2 >= len(steps) and shrinks <= 1
 
-    def forget_missing(self, seen: Iterable[Tuple[str, str]]) -> None:
+    def forget_missing(self, seen: Iterable[Hashable]) -> None:
         """Drop history for objects not seen this frame so a reappearing object starts fresh."""
         seen = set(seen)
         for key in list(self._hist):
@@ -91,37 +102,48 @@ class CalloutPlanner:
     def rank(self, label: str) -> int:
         return self.priority.get(label, len(self.priority))
 
-    def phrase(self, label: str, distance: str, direction: str) -> str:
+    def phrase(self, label: str, distance: str, direction: str, action: Optional[str] = None) -> str:
         if distance == NEAR and direction == AHEAD:
-            return f"{label}, {direction}"
-        word = self.near_word if distance == NEAR else self.medium_word
-        return f"{label}, {word}, {direction}"
+            text = f"{label}, {direction}"
+        else:
+            word = self.near_word if distance == NEAR else self.medium_word
+            text = f"{label}, {word}, {direction}"
+        return f"{text}, {action}" if action else text
 
-    def plan(self, dets: Sequence[Detection], distances: Sequence[str], now: float
+    @staticmethod
+    def speakable(obs: Obstacle) -> bool:
+        """Known classes speak in any zone. Ambiguous ones only when there is something to do:
+        a bag carried at chest height is not a hazard, the same bag on the floor is."""
+        return obs.known or obs.zone != NORMAL
+
+    def plan(self, obstacles: Sequence[Obstacle], distances: Sequence[str], now: float
              ) -> Tuple[Optional[Callout], list[Candidate]]:
         """Return (callout or None, all candidates with their computed fields).
 
-        `distances` is the per-detection bucket from the distance estimator.
+        `distances` is the per-obstacle bucket from the distance estimator(s).
         """
         cands: list[Candidate] = []
-        seen: list[Tuple[str, str]] = []
-        for det, dist in zip(dets, distances):
-            direction = direction_from_cx(det.cx_frac, self.left_max, self.right_min)
-            self.history.update(det.label, direction, det.h_frac)
-            seen.append((det.label, direction))
-            approaching = self.history.is_approaching(det.label, direction)
-            cands.append(Candidate(det, dist, direction, approaching))
+        seen: list[Hashable] = []
+        for obs, dist in zip(obstacles, distances):
+            direction = direction_from_cx(obs.det.cx_frac, self.left_max, self.right_min)
+            key = (obs.label, obs.zone, direction)
+            # Low objects get closer by sliding down the frame; everything else by growing taller.
+            metric = obs.y2_frac if obs.zone == LOW else obs.det.h_frac
+            self.history.update(key, metric)
+            seen.append(key)
+            cands.append(Candidate(obs, dist, direction, self.history.is_approaching(key)))
         self.history.forget_missing(seen)
 
-        qualified = [c for c in cands if c.distance == NEAR or (c.distance == MEDIUM and c.approaching)]
+        qualified = [c for c in cands if self.speakable(c.obs)
+                     and (c.distance == NEAR or (c.distance == MEDIUM and c.approaching))]
         if not qualified:
             return None, cands
 
         # person > stairs > ... ; ties broken by the bigger (closer) box
-        qualified.sort(key=lambda c: (self.rank(c.det.label), -c.det.h_frac))
+        qualified.sort(key=lambda c: (self.rank(c.obs.label), -c.det.h_frac))
 
         for c in qualified:
-            key = (c.det.label, c.direction)
+            key = (c.obs.label, c.direction)
             last = self._last_spoken.get(key)
             if last is not None and now - last[0] < self.rate_limit_s:
                 # Rate limited, unless this is an escalation from medium to near: that is new
@@ -131,8 +153,9 @@ class CalloutPlanner:
                     continue
             self._last_spoken[key] = (now, c.distance)
             return Callout(
-                text=self.phrase(c.det.label, c.distance, c.direction),
-                label=c.det.label, distance=c.distance, direction=c.direction,
-                priority_rank=self.rank(c.det.label), is_near=(c.distance == NEAR),
+                text=self.phrase(c.obs.label, c.distance, c.direction, c.obs.action),
+                label=c.obs.label, distance=c.distance, direction=c.direction,
+                priority_rank=self.rank(c.obs.label), is_near=(c.distance == NEAR),
+                zone=c.obs.zone, action=c.obs.action,
             ), cands
         return None, cands
