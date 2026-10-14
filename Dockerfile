@@ -29,7 +29,8 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvisi
     && grep -vE '^(pnnx|ncnn|onnx|onnxruntime|simpleaudio)' requirements.txt > /tmp/req.txt \
     && pip install -r /tmp/req.txt
 
-COPY config.yaml main.py capture.py detect.py distance.py callout.py speech.py ./
+# All top-level modules, so new ones (e.g. obstacle.py) are picked up without editing this file.
+COPY config.yaml *.py ./
 COPY tools ./tools
 COPY tests ./tests
 
