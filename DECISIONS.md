@@ -138,3 +138,53 @@ pyttsx3 2.99. The 20 unit tests passed unchanged; the fixes below add three more
   real espeak-ng speech on Linux. The Linux speech path is reasoned from the 2.99 driver source;
   only the Windows path has been run here, and whether the audio is audible and correctly worded is
   for the physical acceptance tests.
+
+## Object abstraction (branch `feature/object-abstraction`)
+Goal: tell the user what to *do* about things in the path (step over, duck), and stop announcing
+raw COCO names for classes that are not already part of the spoken vocabulary.
+
+- **New module `obstacle.py`.** A `Detection` becomes an `Obstacle` carrying the spoken label,
+  whether that label is a real class name (`known`), a vertical `zone` and an `action`. The
+  callout planner now works on obstacles; `detect.py` and the camera code are untouched.
+- **Vocabulary = priority list + `class_map` words.** Anything else is spoken as
+  `callout.ambiguous_word` ("object"). This is the literal reading of "names not already included
+  can just be ambiguous". `person` is always known. Identity entries were added to `class_map` for
+  couch, bed, toilet and suitcase so big furniture keeps its name.
+- **Zones from box geometry, not from a model.** With a chest camera roughly level: `low` = box
+  top in the lower half and bottom at or below 0.80 of the frame; `overhead` = box top at the
+  frame edge and bottom above mid frame. Thresholds live under `zones:` and will need tuning on the
+  real mount and camera tilt. A near person spans the whole frame height and is `normal`; people
+  are excluded from zones outright (`zones.exclude`) so a short or seated person is never
+  "step over".
+- **Low obstacles measure distance by bottom edge.** Box height is useless for a small floor
+  object (it stays small however close it is), while the bottom edge slides down the frame as you
+  approach. `BottomEdgeEstimator` (`zones.low_near_bottom` 0.90, `low_medium_bottom` 0.75) is used
+  for low obstacles only; normal and overhead keep box height (or MiDaS with `--depth`). The
+  approach metric follows the same split: bottom edge for low, height for the rest.
+- **Ambiguous objects speak only when low or overhead.** A backpack carried at chest height, a
+  bottle on a table, a cat on a sofa are not walking hazards and would make "object, close, ahead"
+  noise. The same classes on the floor are hazards and are announced with "step over". Known
+  classes keep speaking in every zone as before.
+- **Ignore list trimmed.** bottle, backpack, handbag, umbrella, frisbee, sports ball, baseball bat,
+  skateboard and cat left the ignore list because they can lie in the path. Because they are not in
+  the vocabulary they only ever surface as "object ... step over" / "duck".
+- **Priority.** `object` sits after `post` and before `chair`: a trip hazard outranks furniture
+  but not people or vehicles.
+- **Phrasing.** The action is appended: "object, close, left, step over", "object, ahead, step
+  over" (the near+ahead drop rule still applies), "sign, medium, right, duck". Rate limit key is
+  unchanged (label, direction), so repeated "object" in one direction is throttled.
+- **Limits.** YOLOv8n can only name COCO classes. Boxes, curbs, steps, cables and branches have no
+  class, so a floor hazard is only announced if the model recognises it as *something*. Getting
+  past this needs a different detector (a custom "obstacle" model or depth-based ground-plane
+  segmentation); the zone/action plumbing here is detector-agnostic and ready for that.
+- **Verification (headless, synthetic 320x240 clips, `--mute`).** 38 unit tests pass (15 new).
+  A 35 %-tall bus crop sliding down to the frame bottom: "bus, ahead, step over"; the same clip
+  with `bus` removed from the vocabulary: "object, ahead, step over"; a bus at chest height with
+  `bus` removed: silent; with `bus` known: "bus, ahead". A bus crop hanging from the top edge:
+  "bus, medium, right, duck". Person and empty-room clips behave exactly as before. Throughput
+  unchanged at ~50 fps (`--fast-video`). The real tests are a bag on the floor and a low branch or
+  sign with the webcam; a tie crop and a 16 %-tall bus crop were simply not detected on a grey
+  background, which is a limitation of the synthetic clips, not the pipeline.
+- **Observed on the clips:** YOLO flips the same crop between `bus` and `truck` on some frames,
+  which produces two callouts because they are different labels. Pre-existing behaviour, not
+  introduced here; a label-stability filter is a candidate follow-up.

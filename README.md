@@ -155,7 +155,18 @@ The unit waits 8 seconds after boot so Bluetooth has time to reconnect before th
 6. **Phrasing**: `"{class}, {distance}, {direction}"`; the distance word is dropped for a near
    object straight ahead: `"person, ahead"`. COCO names are mapped to plain words via `class_map`
    and anything in `ignore_classes` (tv, laptop, cell phone, ...) is never spoken.
-7. **Speech** runs in its own thread with a priority queue. The capture loop never waits on it.
+7. **Step over / duck.** Each box is also placed in a vertical **zone** from where it sits in the
+   frame (`zones` in config): a small box low in the frame with its bottom near the frame edge is
+   `low`, a box hanging from the top edge is `overhead`, everything else is `normal`. Low and
+   overhead obstacles get an action word: `"object, close, left, step over"`,
+   `"sign, medium, right, duck"`. Low obstacles measure distance by their bottom edge
+   (`zones.low_near_bottom`) because a shoe box never gets "tall" however close it is.
+   People are never low or overhead.
+8. **Unknown names are "object".** Classes outside the vocabulary (the priority list plus the
+   `class_map` words) are spoken as `callout.ambiguous_word`, and only when they are low or
+   overhead, i.e. when there is something to do about them. A bag at chest height is silent;
+   the same bag on the floor is "object, ahead, step over".
+9. **Speech** runs in its own thread with a priority queue. The capture loop never waits on it.
    A higher-priority callout clears whatever is still queued and is spoken next. A short beep
    precedes near callouts (`tts.beep`).
 
