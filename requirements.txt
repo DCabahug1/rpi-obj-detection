@@ -7,8 +7,11 @@ opencv-python>=4.9
 pyttsx3>=2.90
 PyYAML>=6.0
 numpy>=1.26
-# Optional: short beep before "near" callouts (program works without it)
-simpleaudio>=1.0; platform_system != "Windows"
+# macOS: pyttsx3's native speech driver needs pyobjc
+pyobjc>=9; sys_platform == "darwin"
+# Optional beep before "near" callouts on Linux (Windows and macOS use built-in sounds).
+# Not installed by default: simpleaudio has no wheels for recent Pythons and may fail to build.
+#   pip install simpleaudio
 # Optional: ONNX export/runtime for faster CPU inference
 onnx>=1.15
 onnxruntime>=1.17
