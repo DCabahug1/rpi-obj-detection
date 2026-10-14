@@ -1,0 +1,20 @@
+# Raspberry Pi 5 (Raspberry Pi OS Bookworm, 64-bit).
+#
+# picamera2 is NOT pip-installable in a plain venv; install it system-wide and create the venv with
+# --system-site-packages (see README):
+#   sudo apt install -y python3-picamera2 python3-opencv espeak-ng libportaudio2
+#
+# Then inside the venv:
+ultralytics>=8.2
+pyttsx3>=2.90
+PyYAML>=6.0
+numpy>=1.26
+# NCNN runtime for the exported yolov8n_ncnn_model (fastest CPU path on Pi 5).
+# pnnx is only needed if you run the export on the Pi itself.
+ncnn
+pnnx
+# Optional beep
+simpleaudio>=1.0
+# torch is only needed to run the .pt model or to export; the exported NCNN model runs without it.
+# Install if you want --depth (MiDaS) or export on the Pi itself:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision timm

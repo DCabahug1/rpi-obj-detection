@@ -1,0 +1,21 @@
+# Laptop / development. Install CPU-only torch first to avoid a multi-GB CUDA download:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+torch>=2.2
+torchvision>=0.17
+ultralytics>=8.2
+opencv-python>=4.9
+pyttsx3>=2.90
+PyYAML>=6.0
+numpy>=1.26
+# Optional: short beep before "near" callouts (program works without it)
+simpleaudio>=1.0; platform_system != "Windows"
+# Optional: ONNX export/runtime for faster CPU inference
+onnx>=1.15
+onnxruntime>=1.17
+# Optional: NCNN export for the Pi (tools/export_model.py --format ncnn)
+pnnx
+ncnn
+# Optional: MiDaS depth (--depth) needs timm
+timm>=0.9
+# Dev
+pytest>=8.0

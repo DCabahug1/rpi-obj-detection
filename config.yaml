@@ -1,0 +1,138 @@
+# Vision Pin configuration. Every tunable lives here.
+
+capture:
+  width: 320
+  height: 240
+  camera_index: 0          # webcam index for --source webcam
+
+model:
+  path: yolov8n.pt         # .pt (laptop), .onnx, or yolov8n_ncnn_model/ (Pi). CLI --model overrides.
+  imgsz: 320
+  conf: 0.40
+  iou: 0.50
+  device: cpu
+
+# Distance from bounding-box height as a fraction of frame height.
+distance:
+  near_frac: 0.55          # box >= 55% of frame height -> near
+  medium_frac: 0.30        # box >= 30% -> medium, else far
+
+# Optional MiDaS depth (only with --depth). Values are relative inverse depth from MiDaS_small,
+# normalised to 0..1 per frame; larger = closer.
+depth:
+  every_n_frames: 3
+  near: 0.70
+  medium: 0.45
+
+# Direction from box centre x as a fraction of frame width.
+direction:
+  left_max: 0.38           # cx < 0.38 -> left
+  right_min: 0.62          # cx > 0.62 -> right, otherwise ahead
+
+# "Approaching" = medium object whose box height grew across the last N frames.
+approach:
+  window: 5
+  min_growth_frac: 0.04    # total height growth (fraction of frame) across the window
+
+callout:
+  rate_limit_s: 4.0        # same class + same direction not repeated within this many seconds
+  near_word: close
+  medium_word: medium
+  # Highest first. Unlisted classes rank last. "stairs"/"pole"/"post" are not COCO classes
+  # but are kept so a custom model with those labels slots in without code changes.
+  priority:
+    - person
+    - stairs
+    - bicycle
+    - car
+    - motorcycle
+    - bus
+    - truck
+    - pole
+    - post
+    - chair
+    - table
+    - bench
+    - dog
+
+# COCO name -> plain spoken word.
+class_map:
+  dining table: table
+  potted plant: plant
+  cell phone: phone
+  fire hydrant: hydrant
+  stop sign: sign
+  parking meter: meter
+  traffic light: light
+  sports ball: ball
+  teddy bear: toy
+  hair drier: dryer
+
+# Classes that don't matter when walking. Matched against the raw COCO name.
+ignore_classes:
+  - tv
+  - laptop
+  - cell phone
+  - remote
+  - keyboard
+  - mouse
+  - book
+  - clock
+  - vase
+  - scissors
+  - toothbrush
+  - hair drier
+  - cup
+  - fork
+  - knife
+  - spoon
+  - bowl
+  - bottle
+  - wine glass
+  - banana
+  - apple
+  - sandwich
+  - orange
+  - broccoli
+  - carrot
+  - hot dog
+  - pizza
+  - donut
+  - cake
+  - tie
+  - handbag
+  - backpack
+  - umbrella
+  - frisbee
+  - kite
+  - baseball bat
+  - baseball glove
+  - skateboard
+  - surfboard
+  - tennis racket
+  - airplane
+  - boat
+  - train
+  - bird
+  - cat
+  - sheep
+  - cow
+  - elephant
+  - bear
+  - zebra
+  - giraffe
+  - microwave
+  - oven
+  - toaster
+  - sink
+  - refrigerator
+  - teddy bear
+
+tts:
+  rate: 190                # words per minute
+  volume: 1.0
+  beep: true               # short beep before a "near" callout
+  beep_hz: 880
+  beep_ms: 120
+
+fps_print_interval_s: 1.0
