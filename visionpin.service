@@ -1,0 +1,23 @@
+# systemd unit for Vision Pin on Raspberry Pi. Install with:
+#   sudo cp visionpin.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now visionpin
+# Adjust User= and the paths if you cloned somewhere other than /home/pi/visionpin.
+[Unit]
+Description=Vision Pin obstacle callouts
+After=network.target sound.target bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/visionpin
+# Runs as the user's session so PipeWire/PulseAudio finds the paired Bluetooth sink.
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/bin/sleep 8
+ExecStart=/home/pi/visionpin/.venv/bin/python main.py --source picam --model yolov8n_ncnn_model
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
