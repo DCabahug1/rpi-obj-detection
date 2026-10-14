@@ -79,8 +79,8 @@ class Pyttsx3Engine:
 def _make_beep(hz: int, ms: int):
     """Return a callable that plays a short sine beep, or None if no audio backend is available.
 
-    Windows uses the stdlib winsound module (simpleaudio ships no Windows wheel); elsewhere
-    simpleaudio is used when installed.
+    Windows uses the stdlib winsound module, macOS the afplay command with a system sound;
+    elsewhere simpleaudio is used when installed.
     """
     if sys.platform == "win32":
         import winsound
@@ -92,6 +92,22 @@ def _make_beep(hz: int, ms: int):
                 log.warning("beep failed: %s", e)
 
         return play_win
+    if sys.platform == "darwin":
+        # macOS: play a short system sound with the built-in afplay; no extra package needed
+        # (simpleaudio has no wheels for current Pythons and fails to build on many Macs).
+        import os
+        import shutil
+        import subprocess
+
+        sound = "/System/Library/Sounds/Tink.aiff"
+        if shutil.which("afplay") and os.path.exists(sound):
+            def play_mac():
+                try:
+                    subprocess.run(["afplay", sound], check=False, timeout=2)
+                except Exception as e:  # pragma: no cover
+                    log.warning("beep failed: %s", e)
+
+            return play_mac
     try:
         import numpy as np
         import simpleaudio as sa  # type: ignore

@@ -53,6 +53,22 @@ If no engine is found the program keeps running and logs the callouts instead of
 All thresholds, the class-name map, the ignore list, priorities, the rate limit, and TTS settings
 live in [`config.yaml`](config.yaml).
 
+### macOS notes
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt        # mac torch wheels are CPU/MPS only, no special index needed
+python main.py --source webcam --show
+```
+
+- The first run asks for **camera permission** for your terminal app (System Settings > Privacy &
+  Security > Camera). If the window stays black, grant it and run again.
+- Speech uses the built-in macOS voices through `pyobjc` (installed by the requirements). Set the
+  voice and rate in System Settings > Accessibility > Spoken Content if the default is hard to hear.
+- The beep is a system sound played with `afplay`; nothing to install.
+- Pair Bluetooth headphones in System Settings and pick them as the output device; the program
+  uses whatever the system default is.
+
 ---
 
 ## Raspberry Pi 5 setup
@@ -155,7 +171,23 @@ The unit waits 8 seconds after boot so Bluetooth has time to reconnect before th
 6. **Phrasing**: `"{class}, {distance}, {direction}"`; the distance word is dropped for a near
    object straight ahead: `"person, ahead"`. COCO names are mapped to plain words via `class_map`
    and anything in `ignore_classes` (tv, laptop, cell phone, ...) is never spoken.
-7. **Speech** runs in its own thread with a priority queue. The capture loop never waits on it.
+7. **Step over / duck.** Each box is also placed in a vertical **zone** from where it sits in the
+   frame (`zones` in config): a box low in the frame with its bottom near the frame edge is `low`,
+   a box hanging from the top edge is `overhead`, everything else is `normal`. The zone only says
+   *where* the thing is. Whether to say **"step over"** or **"duck"** is a separate decision
+   (`actions` in config) that also needs the object to be small enough, of a class one can step
+   over, fully in view (not cut off by the left/right edge), straight ahead, and seen in that zone
+   for a few frames. When any of that is missing the callout *describes* instead of prescribing:
+   `"object, close, left, low"`, `"object, medium, right, overhead"`. Low obstacles measure
+   distance by their bottom edge (`zones.low_near_bottom`) because a shoe box never gets "tall"
+   however close it is. People are never low or overhead.
+8. **Unknown names are "object".** Classes outside the vocabulary (the priority list plus the
+   `class_map` words) are spoken as `callout.ambiguous_word`, and only when they are low or
+   overhead, i.e. when there is something to do about them. A bag at chest height is silent;
+   the same bag on the floor straight ahead is "object, ahead, step over". The same physical
+   object read under two names in quick succession (bus/truck) is only announced once
+   (`callout.same_box_iou`).
+9. **Speech** runs in its own thread with a priority queue. The capture loop never waits on it.
    A higher-priority callout clears whatever is still queued and is spoken next. A short beep
    precedes near callouts (`tts.beep`).
 

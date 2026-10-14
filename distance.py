@@ -116,3 +116,31 @@ class MidasEstimator:
         if med >= self.medium:
             return MEDIUM
         return FAR
+
+
+class BottomEdgeEstimator:
+    """Distance for *low* (floor) obstacles from the box's bottom edge.
+
+    Box height says nothing useful about a shoe box on the floor: it stays small however close it
+    is. With a chest camera the floor rises toward the horizon, so the closer a floor object, the
+    lower its bottom edge sits in the frame. Thresholds are fractions of frame height.
+    """
+
+    def __init__(self, near_bottom: float, medium_bottom: float):
+        if not 0 < medium_bottom < near_bottom <= 1.0:
+            raise ValueError("need 0 < medium_bottom < near_bottom <= 1")
+        self.near_bottom = near_bottom
+        self.medium_bottom = medium_bottom
+
+    def bucket(self, y2_frac: float) -> str:
+        if y2_frac >= self.near_bottom:
+            return NEAR
+        if y2_frac >= self.medium_bottom:
+            return MEDIUM
+        return FAR
+
+    def estimate(self, frame_bgr: np.ndarray, det: Detection) -> str:
+        return self.bucket(det.y2 / frame_bgr.shape[0])
+
+    def tick(self) -> None:
+        """Called once per frame. No-op."""

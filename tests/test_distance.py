@@ -49,3 +49,18 @@ def test_midas_falls_back_for_degenerate_box():
     d = det("chair", 0.5, 0.6)
     bad = type(d)(**{**d.__dict__, "x1": 300, "x2": 300})
     assert m.estimate(frame, bad) == NEAR  # from box height 0.6
+
+
+def test_bottom_edge_buckets():
+    from distance import BottomEdgeEstimator
+
+    e = BottomEdgeEstimator(near_bottom=0.90, medium_bottom=0.75)
+    assert e.bucket(0.95) == NEAR
+    assert e.bucket(0.90) == NEAR
+    assert e.bucket(0.80) == MEDIUM
+    assert e.bucket(0.60) == FAR
+    frame = np.zeros((240, 320, 3), np.uint8)
+    assert e.estimate(frame, det("ball", 0.5, 0.1, y2_frac=0.95)) == NEAR
+    assert e.estimate(frame, det("ball", 0.5, 0.1, y2_frac=0.70)) == FAR
+    with pytest.raises(ValueError):
+        BottomEdgeEstimator(0.5, 0.9)
