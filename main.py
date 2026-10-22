@@ -36,6 +36,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--model", help="override model path (.pt, .onnx, or *_ncnn_model dir)")
     p.add_argument("--depth", action="store_true", help="use MiDaS small for distance (off by default)")
     p.add_argument("--show", action="store_true", help="draw boxes, callout and fps in a window")
+    p.add_argument("--fullscreen", action="store_true", help="make the --show window fullscreen (touchscreens)")
     p.add_argument("--mute", action="store_true", help="log callouts instead of speaking them")
     p.add_argument("--config", default=str(Path(__file__).with_name("config.yaml")))
     p.add_argument("--max-frames", type=int, default=0, help="stop after N processed frames (testing)")
@@ -90,7 +91,17 @@ def draw(frame, cands: list[Candidate], callout: Optional[Callout], fps: float):
         cv2.putText(frame, callout.text, (4, frame.shape[0] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (255, 255, 255), 1, cv2.LINE_AA)
     cv2.putText(frame, f"{fps:.1f} fps", (4, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+    x1, y1, x2, y2 = exit_button(frame.shape[1], frame.shape[0])
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (40, 40, 200), -1)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
+    cv2.putText(frame, "EXIT", (x1 + 9, y2 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
     return frame
+
+
+def exit_button(width: int, height: int) -> tuple[int, int, int, int]:
+    """Top-right Exit button in frame pixels, big enough to hit with a finger once scaled up."""
+    w, h = max(56, width // 6), max(26, height // 9)
+    return width - w - 4, 4, width - 4, 4 + h
 
 
 def main(argv=None) -> int:
@@ -136,6 +147,17 @@ def main(argv=None) -> int:
         import cv2
         cv2.namedWindow("Vision Pin", cv2.WINDOW_NORMAL)
 
+        # A touchscreen tap arrives as a left click, in frame coordinates.
+        def _click(event, x, y, *_):
+            nonlocal stop
+            if event == cv2.EVENT_LBUTTONDOWN:
+                x1, y1, x2, y2 = exit_button(width, height)
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    stop = True
+
+        cv2.setMouseCallback("Vision Pin", _click)
+    fullscreen_pending = args.show and args.fullscreen
+
     seq = 0
     processed = 0
     fps = 0.0
@@ -178,6 +200,10 @@ def main(argv=None) -> int:
             if args.show:
                 shown = last_callout if now - last_callout_t < 2.0 else None
                 cv2.imshow("Vision Pin", draw(frame.copy(), cands, shown, fps))
+                if fullscreen_pending:
+                    # Some compositors ignore fullscreen requested before the window is mapped.
+                    cv2.setWindowProperty("Vision Pin", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                    fullscreen_pending = False
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
